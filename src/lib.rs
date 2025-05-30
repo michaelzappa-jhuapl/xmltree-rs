@@ -54,6 +54,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::io::{Read, Write};
 
+use xml::common::{Position, TextPosition};
 pub use xml::namespace::Namespace;
 pub use xml::reader::ParserConfig;
 use xml::reader::{EventReader, XmlEvent};
@@ -159,6 +160,10 @@ pub struct Element {
 
     /// Children
     pub children: Vec<XMLNode>,
+
+    /// Start text position in original XML. None if not a result of
+    /// text parsing.
+    pub start_position: Option<TextPosition>,
 }
 
 /// Errors that can occur parsing XML
@@ -227,6 +232,7 @@ fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Elem
                     name: name.local_name,
                     attributes: attr_map,
                     children: Vec::new(),
+                    start_position: Some(reader.position()),
                 };
                 elem.children
                     .push(XMLNode::Element(build(reader, new_elem)?));
@@ -239,7 +245,7 @@ fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Elem
                 .children
                 .push(XMLNode::ProcessingInstruction(name, data)),
             Ok(XmlEvent::StartDocument { .. }) | Ok(XmlEvent::EndDocument) => {
-                return Err(ParseError::CannotParse)
+                return Err(ParseError::CannotParse);
             }
             Err(e) => return Err(ParseError::MalformedXml(e)),
         }
@@ -258,6 +264,7 @@ impl Element {
             namespaces: None,
             attributes: AttributeMap::new(),
             children: Vec::new(),
+            start_position: None,
         }
     }
 
@@ -277,6 +284,7 @@ impl Element {
         let mut reader = EventReader::new_with_config(r, parser_config);
         let mut root_nodes = Vec::new();
         loop {
+            let cur_position = reader.position();
             match reader.next() {
                 Ok(XmlEvent::StartElement {
                     name,
@@ -299,6 +307,7 @@ impl Element {
                         name: name.local_name,
                         attributes: attr_map,
                         children: Vec::new(),
+                        start_position: Some(cur_position),
                     };
                     root_nodes.push(XMLNode::Element(build(&mut reader, root)?));
                 }
@@ -405,8 +414,8 @@ impl Element {
     /// Writes out this element as the root element in a new XML document using the provided configuration
     pub fn write_with_config<W: Write>(&self, w: W, config: EmitterConfig) -> Result<(), Error> {
         use xml::common::XmlVersion;
-        use xml::writer::events::XmlEvent;
         use xml::writer::EventWriter;
+        use xml::writer::events::XmlEvent;
 
         let write_document_declaration = config.write_document_declaration;
         let mut emitter = EventWriter::new_with_config(w, config);
