@@ -164,6 +164,10 @@ pub struct Element {
     /// Start text position in original XML. None if not a result of
     /// text parsing.
     pub start_position: Option<TextPosition>,
+
+    /// End text position in original XML. None if not a result of
+    /// text parsing or parsing is incomplete.
+    pub end_position: Option<TextPosition>,
 }
 
 /// Errors that can occur parsing XML
@@ -205,7 +209,17 @@ fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Elem
     loop {
         match reader.next() {
             Ok(XmlEvent::EndElement { ref name }) => {
+                let end_tag_start = reader.position();
+                let end_tag_end = TextPosition {
+                    row: end_tag_start.row,
+                    // NOTE: Start position, plus length of element
+                    // name, plus 3 for the '</>'. This span is
+                    // inclusive on the start and exclusive on the
+                    // end.
+                    column: end_tag_start.column + (name.local_name.len() as u64) + 3,
+                };
                 if name.local_name == elem.name {
+                    elem.end_position = Some(end_tag_end);
                     return Ok(elem);
                 } else {
                     return Err(ParseError::CannotParse);
@@ -233,6 +247,7 @@ fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Elem
                     attributes: attr_map,
                     children: Vec::new(),
                     start_position: Some(reader.position()),
+                    end_position: None,
                 };
                 elem.children
                     .push(XMLNode::Element(build(reader, new_elem)?));
@@ -265,6 +280,7 @@ impl Element {
             attributes: AttributeMap::new(),
             children: Vec::new(),
             start_position: None,
+            end_position: None,
         }
     }
 
@@ -308,6 +324,7 @@ impl Element {
                         attributes: attr_map,
                         children: Vec::new(),
                         start_position: Some(cur_position),
+                        end_position: None,
                     };
                     root_nodes.push(XMLNode::Element(build(&mut reader, root)?));
                 }
