@@ -544,14 +544,14 @@ where
     }
 }
 
-impl<'a> ElementPredicate for &'a str {
+impl ElementPredicate for &str {
     /// Search by tag name
     fn match_element(&self, e: &Element) -> bool {
         (*self,).match_element(e)
     }
 }
 
-impl<'a> ElementPredicate for Cow<'a, str> {
+impl ElementPredicate for Cow<'_, str> {
     /// Search by tag name
     fn match_element(&self, e: &Element) -> bool {
         (&**self,).match_element(e)
