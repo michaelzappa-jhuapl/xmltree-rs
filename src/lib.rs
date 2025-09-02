@@ -163,11 +163,13 @@ pub struct Element {
 
     /// Start text position in original XML. None if not a result of
     /// text parsing.
-    pub start_position: Option<TextPosition>,
+    pub start_tag_start_position: Option<TextPosition>,
+    pub start_tag_end_position: Option<TextPosition>,
 
     /// End text position in original XML. None if not a result of
     /// text parsing or parsing is incomplete.
-    pub end_position: Option<TextPosition>,
+    pub end_tag_start_position: Option<TextPosition>,
+    pub end_tag_end_position: Option<TextPosition>,
 }
 
 /// Errors that can occur parsing XML
@@ -207,6 +209,7 @@ impl std::error::Error for ParseError {
 
 fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Element, ParseError> {
     loop {
+        let cur_position = reader.position();
         match reader.next() {
             Ok(XmlEvent::EndElement { ref name }) => {
                 let end_tag_start = reader.position();
@@ -219,7 +222,12 @@ fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Elem
                     column: end_tag_start.column + (name.local_name.len() as u64) + 3,
                 };
                 if name.local_name == elem.name {
-                    elem.end_position = Some(end_tag_end);
+                    if elem.start_tag_end_position.is_none() {
+                        elem.start_tag_end_position = Some(cur_position);
+                    }
+
+                    elem.end_tag_start_position = Some(end_tag_start);
+                    elem.end_tag_end_position = Some(end_tag_end);
                     return Ok(elem);
                 } else {
                     return Err(ParseError::CannotParse);
@@ -243,22 +251,48 @@ fn build<B: Read>(reader: &mut EventReader<B>, mut elem: Element) -> Result<Elem
                     } else {
                         Some(namespace)
                     },
-                    name: name.local_name,
+                    name: name.local_name.clone(),
                     attributes: attr_map,
                     children: Vec::new(),
-                    start_position: Some(reader.position()),
-                    end_position: None,
+                    start_tag_start_position: Some(reader.position()),
+                    start_tag_end_position: None,
+                    end_tag_start_position: None,
+                    end_tag_end_position: None,
                 };
+
+                if elem.start_tag_end_position.is_none() {
+                    elem.start_tag_end_position = Some(reader.position());
+                }
+
                 elem.children
                     .push(XMLNode::Element(build(reader, new_elem)?));
             }
-            Ok(XmlEvent::Characters(s)) => elem.children.push(XMLNode::Text(s)),
+            Ok(XmlEvent::Characters(s)) => {
+                if elem.start_tag_end_position.is_none() {
+                    elem.start_tag_end_position = Some(reader.position());
+                }
+                elem.children.push(XMLNode::Text(s))
+            }
             Ok(XmlEvent::Whitespace(..)) => (),
-            Ok(XmlEvent::Comment(s)) => elem.children.push(XMLNode::Comment(s)),
-            Ok(XmlEvent::CData(s)) => elem.children.push(XMLNode::CData(s)),
-            Ok(XmlEvent::ProcessingInstruction { name, data }) => elem
-                .children
-                .push(XMLNode::ProcessingInstruction(name, data)),
+            Ok(XmlEvent::Comment(s)) => {
+                if elem.start_tag_end_position.is_none() {
+                    elem.start_tag_end_position = Some(reader.position());
+                }
+                elem.children.push(XMLNode::Comment(s))
+            }
+            Ok(XmlEvent::CData(s)) => {
+                if elem.start_tag_end_position.is_none() {
+                    elem.start_tag_end_position = Some(reader.position());
+                }
+                elem.children.push(XMLNode::CData(s))
+            }
+            Ok(XmlEvent::ProcessingInstruction { name, data }) => {
+                if elem.start_tag_end_position.is_none() {
+                    elem.start_tag_end_position = Some(reader.position());
+                }
+                elem.children
+                    .push(XMLNode::ProcessingInstruction(name, data))
+            }
             Ok(XmlEvent::StartDocument { .. }) | Ok(XmlEvent::EndDocument) => {
                 return Err(ParseError::CannotParse);
             }
@@ -279,8 +313,10 @@ impl Element {
             namespaces: None,
             attributes: AttributeMap::new(),
             children: Vec::new(),
-            start_position: None,
-            end_position: None,
+            start_tag_start_position: None,
+            start_tag_end_position: None,
+            end_tag_start_position: None,
+            end_tag_end_position: None,
         }
     }
 
@@ -323,8 +359,10 @@ impl Element {
                         name: name.local_name,
                         attributes: attr_map,
                         children: Vec::new(),
-                        start_position: Some(cur_position),
-                        end_position: None,
+                        start_tag_start_position: Some(cur_position),
+                        start_tag_end_position: Some(reader.position()),
+                        end_tag_start_position: None,
+                        end_tag_end_position: None,
                     };
                     root_nodes.push(XMLNode::Element(build(&mut reader, root)?));
                 }
